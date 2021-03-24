@@ -120,7 +120,7 @@ def parse_args():
         description='''Create Android Archive (AAR) package for one or more Android ABI(s)
         and building properties specified in the given build config file, see
         tools/ci_build/github/android/default_mobile_aar_config.json and
-        tools/ci_build/github/android/build_aar_package.readme.txt for reference
+        tools/ci_build/github/android/build_aar_package.md for details
         '''
     )
 
