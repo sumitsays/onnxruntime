@@ -97,7 +97,7 @@ def _build_aar(args):
             os.symlink(os.path.join(_build_dir, _build_flavor, lib_name), _target_lib_name)
 
     # The directory to publish final AAR
-    _aar_publish_dir = os.path.join(build_dir, 'aar_out_', _build_flavor)
+    _aar_publish_dir = os.path.join(build_dir, 'aar_out', _build_flavor)
     os.makedirs(_aar_publish_dir, exist_ok=True)
 
     # get the common gradle command args
@@ -122,8 +122,7 @@ def parse_args():
         os.path.basename(__file__),
         description='''Create Android Archive (AAR) package for one or more Android ABI(s)
         and building properties specified in the given build config file, see
-        tools/ci_build/github/android/default_mobile_aar_build_settings.json and
-        tools/ci_build/github/android/build_aar_package.md for details
+        tools/ci_build/github/android/default_mobile_aar_build_settings.json for details
         '''
     )
 
