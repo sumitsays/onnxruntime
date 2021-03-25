@@ -65,10 +65,11 @@ def _build_aar(args):
 
     # Temp dirs to hold building results
     _intermediates_dir = os.path.join(build_dir, 'intermediates')
-    _aar_dir = os.path.join(_intermediates_dir, 'aar')
-    _jnilibs_dir = os.path.join(_intermediates_dir, 'jnilibs')
+    _build_flavor = build_settings['build_flavor']
+    _aar_dir = os.path.join(_intermediates_dir, 'aar', _build_flavor)
+    _jnilibs_dir = os.path.join(_intermediates_dir, 'jnilibs', _build_flavor)
     _base_build_command = [
-        'python3', BUILD_PY, '--config=' + build_settings['build_flavor']
+        'python3', BUILD_PY, '--config=' + _build_flavor
     ] + build_settings['build_params']
 
     # Build binary for each ABI, one by one
@@ -90,12 +91,13 @@ def _build_aar(args):
         os.makedirs(_jnilibs_abi_dir, exist_ok=True)
         for lib_name in ['libonnxruntime.so', 'libonnxruntime4j_jni.so']:
             _target_lib_name = os.path.join(_jnilibs_abi_dir, lib_name)
+            # if the symbolic already exists, delete it first
             if os.path.exists(_target_lib_name):
                 os.remove(_target_lib_name)
-            os.symlink(os.path.join(_build_dir, build_settings['build_flavor'], lib_name), _target_lib_name)
+            os.symlink(os.path.join(_build_dir, _build_flavor, lib_name), _target_lib_name)
 
     # The directory to publish final AAR
-    _aar_publish_dir = os.path.join(build_dir, 'aar_out')
+    _aar_publish_dir = os.path.join(build_dir, 'aar_out_', _build_flavor)
     os.makedirs(_aar_publish_dir, exist_ok=True)
 
     # get the common gradle command args
