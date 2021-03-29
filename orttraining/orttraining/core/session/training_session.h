@@ -18,6 +18,11 @@ namespace training {
 
 constexpr char SHARED_OPTIMIZER_STATES_KEY[] = "shared_optimizer_state";
 
+common::Status SetEvalFeeds(
+  std::shared_ptr<onnxruntime::Model> model,
+  const std::unordered_set<std::string>& nodes_needing_eval_feeds,
+  const std::string& eval_feed_name);
+
 class TrainingSession : public InferenceSession {
  public:
   typedef std::unordered_map<std::string /*OpType*/,

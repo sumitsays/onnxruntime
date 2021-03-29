@@ -160,6 +160,49 @@ void TrainingSession::FilterUnusedWeights(const std::unordered_set<std::string>&
 
 const std::string TrainingSession::training_mode_string_ = "training_mode";
 
+Status SetEvalFeeds(
+  std::shared_ptr<onnxruntime::Model> model,
+  const std::unordered_set<std::string>& nodes_needing_eval_feeds,
+  const std::string& eval_feed_name) {
+
+  auto& graph = model->MainGraph();
+  GraphAugmenter::GraphDefs defs{};
+  bool is_training_mode_added_as_initializer = false;
+  bool is_training_mode_added_as_input = false;
+
+  // Update the graph to add training_mode as input to the ops defined in nodes_needing_eval_feeds
+  for (auto& node : graph.Nodes()) {
+    if (nodes_needing_eval_feeds.count(node.OpType()) && node.InputArgCount().size() > 2) {
+      auto& mode_input = node.MutableInputDefs()[2];
+      const ONNX_NAMESPACE::TensorProto* mode_initializer = nullptr;
+      if (!graph.GetInitializedTensor(eval_feed_name, mode_initializer)) {
+        // training_mode initializer has not been added before, add it here.
+        // Ideally we want only 1 training_mode initializer to control all relevant nodes.
+        const ONNX_NAMESPACE::TensorProto* original_mode_initializer = nullptr;
+        ORT_ENFORCE(graph.GetInitializedTensor(mode_input->Name(), original_mode_initializer) == true,
+                    node.OpType() + "'s input: " + mode_input->Name() + " must be an initializer.");
+        ONNX_NAMESPACE::TensorProto new_mode_initializer(*original_mode_initializer);
+        new_mode_initializer.set_name(eval_feed_name);
+        if (!is_training_mode_added_as_initializer) {
+          defs.AddInitializers({new_mode_initializer});
+          is_training_mode_added_as_initializer = true;
+        }
+      }
+      mode_input = &graph.GetOrCreateNodeArg(eval_feed_name, mode_input->TypeAsProto());
+      // Set training_mode as graph input if any node that needs eval feed is found,
+      // it's okay to add it multiple times since it will be de-dup'ed downstream.
+      if (!is_training_mode_added_as_input) {
+        defs.AddGraphInputs({eval_feed_name});
+        is_training_mode_added_as_input = true;
+      }
+    }
+  }
+
+  ORT_RETURN_IF_ERROR(GraphAugmenter::AugmentGraph(graph, defs));
+
+  return Status::OK();
+}
+
 Status TrainingSession::BuildLoss(
     const optional<std::string>& external_loss_name,
     std::string& loss_name,
@@ -1221,44 +1264,8 @@ static const std::unordered_set<std::string> Nodes_Need_Eval_Feeds = {
 };
 
 Status TrainingSession::SetEvalFeedNames() {
-  Graph& graph = model_->MainGraph();
+  ORT_RETURN_IF_ERROR(SetEvalFeeds(model_, Nodes_Need_Eval_Feeds, training_mode_string_));
 
-  GraphAugmenter::GraphDefs defs{};
-  std::set<std::string> def_graph_input_names;
-  std::set<std::string> def_graph_initializer_names;
-
-  for (auto& node : graph.Nodes()) {
-    auto it = Nodes_Need_Eval_Feeds.find(node.OpType());
-    if (it != Nodes_Need_Eval_Feeds.cend()) {
-      // The opset is < 12, add each ratio input to graph inputs for overriding.
-      if (node.InputArgCount().size() > 2) {
-        auto& mode_input = node.MutableInputDefs()[2];
-        const ONNX_NAMESPACE::TensorProto* mode_initializer = nullptr;
-        if (!graph.GetInitializedTensor(training_mode_string_, mode_initializer)) {
-          // training_mode initializer has not been added before, add it here.
-          // Ideally we want only 1 training_mode initializer to control all relevant nodes.
-          const ONNX_NAMESPACE::TensorProto* original_mode_initializer = nullptr;
-          ORT_ENFORCE(graph.GetInitializedTensor(mode_input->Name(), original_mode_initializer) == true,
-                      "Dropout's input: " + mode_input->Name() + " must be an initializer.");
-          ONNX_NAMESPACE::TensorProto new_mode_initializer(*original_mode_initializer);
-          new_mode_initializer.set_name(training_mode_string_);
-          if (def_graph_initializer_names.find(training_mode_string_) == def_graph_initializer_names.end()) {
-            defs.AddInitializers({new_mode_initializer});
-            def_graph_initializer_names.insert(training_mode_string_);
-          }
-        }
-        mode_input = &model_->MainGraph().GetOrCreateNodeArg(training_mode_string_, mode_input->TypeAsProto());
-        // Set training_mode as graph input if any node that needs eval feed is found,
-        // it's okay to add it multiple times since it will be de-dup'ed downstream.
-        if (def_graph_input_names.find(training_mode_string_) == def_graph_input_names.end()) {
-          defs.AddGraphInputs({training_mode_string_});
-          def_graph_input_names.insert(training_mode_string_);
-        }
-      }
-    }
-  }
-
-  ORT_RETURN_IF_ERROR(GraphAugmenter::AugmentGraph(graph, defs));
   return DoPostLoadProcessing(*model_);
 }
 

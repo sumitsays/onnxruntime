@@ -1566,3 +1566,62 @@ def test_model_with_constant_and_registered_parameters():
     # Make sure model runs without any exception
     output = ort_model(x)
     assert output is not None
+
+def test_eval_with_dropout():
+    class NeuralNetDropout(torch.nn.Module):
+        def __init__(self, input_size, hidden_size, num_classes):
+            super(NeuralNetDropout, self).__init__()
+
+            self.fc1 = torch.nn.Linear(input_size, hidden_size)
+            self.relu = torch.nn.ReLU()
+            self.fc2 = torch.nn.Linear(hidden_size, num_classes)
+            self.dropout = torch.nn.Dropout()
+
+        def forward(self, input1):
+            out = self.fc1(input1)
+            out = self.relu(out)
+            out = self.fc2(out)
+            out = self.dropout(out)
+            return out
+
+    device = 'cuda'
+
+    N, D_in, H, D_out = 64, 784, 500, 10
+    model = NeuralNetDropout(D_in, H, D_out).to(device)
+    model.eval()
+    ort_model = ORTModule(copy.deepcopy(model))
+    ort_model.eval()
+
+    x = torch.randn(N, D_in, device=device)
+    y = x.clone()
+
+    # Make sure model runs without any exception
+    output = ort_model(x)
+    output_pt = model(y)
+
+    assert output is not None
+    assert output_pt is not None
+    # Assert that the output from torch is the same as the one from ORTModule
+    assert torch.equal(output, output_pt)
+
+def test_with_torch_no_grad_context():
+    device = 'cuda'
+
+    N, D_in, H, D_out = 64, 784, 500, 10
+    model = NeuralNetSinglePositionalArgument(D_in, H, D_out).to(device)
+    ort_model = ORTModule(copy.deepcopy(model))
+
+    x = torch.randn(N, D_in, device=device)
+    y = x.clone()
+
+    # Make sure model runs without any exception
+    output = None
+    output_pt = None
+    with torch.no_grad():
+        output = ort_model(x)
+        output_pt = model(y)
+
+    assert output is not None
+    assert output_pt is not None
+    # Assert that the output from torch is the same as the one from ORTModule
+    assert torch.equal(output, output_pt)

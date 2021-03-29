@@ -285,3 +285,7 @@ def state_dict_trainer_options_optimizer_name_key():
     """Returns the trainer options optimizer_name key name in the state dictionary"""
 
     return 'optimizer_name'
+
+def training_mode_input_name():
+
+    return 'training_mode'
