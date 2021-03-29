@@ -136,12 +136,11 @@ jobs:
     inputs:
       ArtifactName: CodeAnalysisLogs
 
-  - task: PostAnalysis@2
+  - task: PostAnalysis@1
     displayName: 'Post Analysis'
     inputs:
-      GdnBreakAllTools: false
-      GdnBreakGdnToolSDLNativeRules: true
-      GdnBreakGdnToolSDLNativeRulesSeverity: Warning
+      SDLNativeRules: true
+      ToolLogsNotFoundAction: Error
 
   - task: PublishTestResults@2
     displayName: 'Publish unit test results'
