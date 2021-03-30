@@ -22,7 +22,7 @@ jobs:
       x86_release:
         BuildConfig: 'RelWithDebInfo'
         UseOmp: ''
-        EnvSetupScript: setup_env.bat
+        EnvSetupScript: setup_env_x86.bat
         buildArch: x86
         additionalBuildFlags: --x86
         msbuildPlatform: Win32
