@@ -8,7 +8,7 @@ jobs:
         UseOmp: '--use_openmp'
         EnvSetupScript: setup_env.bat
         buildArch: x64
-        additionalBuildFlags: --use_dnnl --build_java
+        additionalBuildFlags: --use_dnnl --build_java --build_nodejs
         msbuildPlatform: x64
         isX86: false
       x64_release:
@@ -16,7 +16,7 @@ jobs:
         UseOmp: ''
         EnvSetupScript: setup_env.bat
         buildArch: x64
-        additionalBuildFlags: --use_dnnl --build_java
+        additionalBuildFlags: --use_dnnl --build_java --build_nodejs
         msbuildPlatform: x64
         isX86: false
       x86_release:
@@ -99,7 +99,7 @@ jobs:
     displayName: 'Generate cmake config'
     inputs:
       scriptPath: '$(Build.SourcesDirectory)\tools\ci_build\build.py'
-      arguments: '--gen_doc --config $(BuildConfig) --build_dir $(Build.BinariesDirectory) $(UseOmp) --skip_submodule_sync --build_shared_lib --update --cmake_generator "Visual Studio 16 2019" --build_wheel --use_winml  --build_shared_lib --enable_onnx_tests --enable_wcos --build_nodejs $(additionalBuildFlags)'
+      arguments: '--gen_doc --config $(BuildConfig) --build_dir $(Build.BinariesDirectory) $(UseOmp) --skip_submodule_sync --build_shared_lib --update --cmake_generator "Visual Studio 16 2019" --build_wheel --use_winml  --build_shared_lib --enable_onnx_tests --enable_wcos $(additionalBuildFlags)'
       workingDirectory: '$(Build.BinariesDirectory)'
 
   - task: VSBuild@1
@@ -158,7 +158,7 @@ jobs:
      del wheel_filename_file
      python.exe -m pip install -q --upgrade %WHEEL_FILENAME%
      set PATH=$(Build.BinariesDirectory)\$(BuildConfig)\$(BuildConfig);%PATH%
-     python $(Build.SourcesDirectory)\tools\ci_build\build.py --gen_doc --config $(BuildConfig) --build_dir $(Build.BinariesDirectory) $(UseOmp) --skip_submodule_sync --build_shared_lib --test --cmake_generator "Visual Studio 16 2019" --build_wheel --use_winml  --build_shared_lib --enable_onnx_tests --enable_wcos --build_nodejs $(additionalBuildFlags)
+     python $(Build.SourcesDirectory)\tools\ci_build\build.py --gen_doc --config $(BuildConfig) --build_dir $(Build.BinariesDirectory) $(UseOmp) --skip_submodule_sync --build_shared_lib --test --cmake_generator "Visual Studio 16 2019" --build_wheel --use_winml  --build_shared_lib --enable_onnx_tests --enable_wcos $(additionalBuildFlags)
    
     workingDirectory: '$(Build.BinariesDirectory)\$(BuildConfig)\$(BuildConfig)'
     displayName: 'Run tests'
