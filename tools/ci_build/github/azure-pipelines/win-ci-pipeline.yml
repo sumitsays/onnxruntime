@@ -10,20 +10,6 @@ jobs:
         buildArch: x64
         AdditionalBuildFlags: --use_dnnl --build_java
         msbuildPlatform: x64
-      x64_release:
-        BuildConfig: 'RelWithDebInfo'
-        UseOmp: ''
-        EnvSetupScript: setup_env.bat
-        buildArch: x64
-        AdditionalBuildFlags: --use_dnnl --build_java
-        msbuildPlatform: x64
-      x86_release:
-        BuildConfig: 'RelWithDebInfo'
-        UseOmp: ''
-        EnvSetupScript: setup_env.bat
-        buildArch: x86
-        AdditionalBuildFlags: --x86
-        msbuildPlatform: Win32
   variables:
     OrtPackageId: 'Microsoft.ML.OnnxRuntime'
     MsbuildArguments: '-detailedsummary -maxcpucount -consoleloggerparameters:PerformanceSummary'
