@@ -318,6 +318,9 @@ class ORTModule(torch.nn.Module):
         self._original_module_output_schema = None
         self._onnx_graphs_info = None
 
+        # Graph transformer config
+        self._propagate_cast_ops = False
+
         # Training model
         self._onnx_training = None
         self._training_session = None
@@ -360,6 +363,8 @@ class ORTModule(torch.nn.Module):
         grad_builder_config.initializer_names = initializer_names
         grad_builder_config.initializer_names_to_train = initializer_names_to_train
         grad_builder_config.input_names_require_grad = self._input_names_require_grad
+        grad_builder_config.graph_transformer_config = C.GraphTransformerConfiguration()
+        grad_builder_config.graph_transformer_config.propagate_cast_ops = self._propagate_cast_ops
         self._module_gradient_graph_builder = C.ModuleGradientGraphBuilder()
         self._module_gradient_graph_builder.initialize(
             self._onnx_inference.SerializeToString(), grad_builder_config)

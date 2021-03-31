@@ -229,6 +229,7 @@ TrainingConfigurationResult ConfigureSessionForTraining(
   config.graph_transformer_config.gelu_recompute = parameters.gelu_recompute;
   config.graph_transformer_config.transformer_layer_recompute = parameters.transformer_layer_recompute;
   config.graph_transformer_config.number_recompute_layers = parameters.number_recompute_layers;
+  config.graph_transformer_config.propagate_cast_ops = parameters.propagate_cast_ops;
 
   if (!parameters.model_after_graph_transforms_path.empty()) {
     config.model_after_graph_transforms_path = ToPathString(parameters.model_after_graph_transforms_path);
@@ -499,6 +500,17 @@ py::class_<TrainingAgent>(m, "TrainingAgent", R"pbdoc(This is the main class use
       })
       ;
 
+  py::class_<TrainingSession::TrainingConfiguration::GraphTransformerConfiguration> graph_transformer_config(
+      m, "GraphTransformerConfiguration",
+      R"pbdoc(Graph transformer configuration.)pbdoc");
+  graph_transformer_config.def(py::init())
+      .def_readwrite("enable_gelu_approximation", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::enable_gelu_approximation)
+      .def_readwrite("attn_dropout_recompute", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::attn_dropout_recompute)
+      .def_readwrite("gelu_recompute", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::gelu_recompute)
+      .def_readwrite("transformer_layer_recompute", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::transformer_layer_recompute)
+      .def_readwrite("number_recompute_layers", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::number_recompute_layers)
+      .def_readwrite("propagate_cast_ops", &TrainingSession::TrainingConfiguration::GraphTransformerConfiguration::propagate_cast_ops);
+
   py::class_<ModuleGradientGraphBuilderConfiguration> module_gradient_graph_builder_config(
       m, "ModuleGradientGraphBuilderConfiguration",
       R"pbdoc(Configuration information for module gradient graph builder.)pbdoc");
@@ -507,7 +519,8 @@ py::class_<TrainingAgent>(m, "TrainingAgent", R"pbdoc(This is the main class use
       .def_readwrite("initializer_names_to_train", &ModuleGradientGraphBuilderConfiguration::initializer_names_to_train)
       .def_readwrite("input_names_require_grad", &ModuleGradientGraphBuilderConfiguration::input_names_require_grad)
       .def_readwrite("use_invertible_layernorm_grad",
-                     &ModuleGradientGraphBuilderConfiguration::use_invertible_layernorm_grad);
+                     &ModuleGradientGraphBuilderConfiguration::use_invertible_layernorm_grad)
+      .def_readwrite("graph_transformer_config", &ModuleGradientGraphBuilderConfiguration::graph_transformer_config);
 
   py::class_<TrainingGraphInfo> training_graph_info(m, "TrainingGraphInfo",
                                                 R"pbdoc(The information of split graphs for frontend.)pbdoc");

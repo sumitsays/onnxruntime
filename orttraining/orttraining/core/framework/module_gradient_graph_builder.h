@@ -8,6 +8,7 @@
 
 #include "core/common/status.h"
 #include "core/graph/model.h"
+#include "orttraining/core/session/training_session.h"
 
 namespace onnxruntime {
 namespace training {
@@ -25,8 +26,7 @@ struct ModuleGradientGraphBuilderConfiguration {
 
   // Gradient graph configuration.
   bool use_invertible_layernorm_grad = false;
-
-  // TODO: add GraphTransformerConfiguration
+  TrainingSession::TrainingConfiguration::GraphTransformerConfiguration graph_transformer_config{};
 };
 
 /**
@@ -101,6 +101,7 @@ class ModuleGradientGraphBuilder {
 
   ModuleGradientGraphBuilderConfiguration config_;
   const logging::Logger* logger_ = &logging::LoggingManager::DefaultLogger();  // use default logger for now.
+  TrainingSession::TrainingConfiguration::GraphTransformerConfiguration graph_transformer_config_;
 };
 
 }  // namespace training
