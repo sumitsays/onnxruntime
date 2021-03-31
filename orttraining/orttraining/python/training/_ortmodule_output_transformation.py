@@ -5,6 +5,16 @@ import inspect
 import torch
 import warnings
 
+
+class _InputSchema(object):
+    def __init__(self, names, dynamic_axes, require_grad_names, shape, instance_id):
+        self.names = names
+        self.dynamic_axes = dynamic_axes
+        self.require_grad_names = require_grad_names
+        self.shape = shape
+        self.instance_id = instance_id
+
+
 def deepcopy_model_input(*inputs, **kwargs):
     sample_inputs_copy = []
     for model_input in inputs:
@@ -18,9 +28,11 @@ def deepcopy_model_input(*inputs, **kwargs):
 
     return sample_inputs_copy, sample_kwargs_copy
 
+
 class _TensorStub:
     # Stub for a torch.Tensor value to be used to formulate the output schema
     pass
+
 
 def populate_user_output_from_schema_and_outputs(output_schema, output_names, outputs):
     """Follows the schema to generate an output that is expected by the user"""
@@ -64,6 +76,7 @@ def populate_user_output_from_schema_and_outputs(output_schema, output_names, ou
 
     return user_output
 
+
 def _extract_output_schema(output):
     """Extract the output schema by replacing every torch.Tensor value with _TensorStub"""
 
@@ -91,6 +104,7 @@ def _extract_output_schema(output):
         raise TypeError(f'ORTModule does not support the following model output type {type(output)}')
 
     return output
+
 
 def _parse_outputs_and_extract_names_and_dynamic_axes(module_output):
     """Parses through the module output and returns output names and dynamic axes"""
@@ -124,6 +138,7 @@ def _parse_outputs_and_extract_names_and_dynamic_axes(module_output):
     _populate_output_names_and_dynamic_axes(module_output, output_names, output_dynamic_axes, output_idx)
 
     return output_names, output_dynamic_axes
+
 
 def get_flattened_output_module(original_module):
     """Returns a torch.nn.Module that flattens the output of the original module in its forward method"""
@@ -218,7 +233,8 @@ def parse_inputs_for_onnx_export(all_input_parameters, onnx_graph, *inputs, **kw
                     dynamic_axes[name].update({dim_idx : f'input{input_idx}_dim{dim_idx}'})
 
                 input_shape.append(list(inp.size()))
-    return input_names, dynamic_axes, input_names_require_grad, input_shape
+    return _InputSchema(input_names, dynamic_axes, input_names_require_grad, input_shape, input_hash_id)
+
 
 def parse_outputs_for_onnx_export_and_extract_output_schema(module, inputs, kwargs):
 
@@ -235,8 +251,9 @@ def parse_outputs_for_onnx_export_and_extract_output_schema(module, inputs, kwar
             model_copy = copy.deepcopy(module)
         except Exception:
             model_copy = module
-            warnings.warn("This model cannot be deep copied (or pickled), which is a required step for stateful models to be properly exported to ONNX."
-                            " Compute will continue, but unexpected results may occur!")
+            warnings.warn("This model cannot be deep copied (or pickled), "
+                          "which is a required step for stateful models to be properly exported to ONNX."
+                          " Compute will continue, but unexpected results may occur!")
 
         sample_outputs = model_copy(*sample_inputs_copy, **sample_kwargs_copy)
 
