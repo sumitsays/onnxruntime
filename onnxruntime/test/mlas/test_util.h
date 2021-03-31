@@ -143,6 +143,44 @@ class MatrixGuardBuffer {
   T* _GuardAddress;
 };
 
+class MlasTestBase
+{
+public:
+    virtual
+    ~MlasTestBase(
+        void
+        )
+    {
+    }
+
+    //
+    // Contains tests that run quickly as part of a checkin integration to
+    // sanity check that the functionality is working.
+    //
+
+    // virtual
+    // void
+    // ExecuteShort(
+    //     void
+    //     )
+    // {
+    // }
+
+    //
+    // Contains tests that can run slowly to more exhaustively test that
+    // functionality is working across a broader range of parameters.
+    //
+
+    virtual
+    void
+    ExecuteLong(
+        void
+        )
+    {
+    }
+};
+
+
 typedef std::function<size_t()> TestRegistor;
 
 // Singleton to let different part of test register.

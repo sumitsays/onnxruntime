@@ -35,17 +35,28 @@ class FGemmTestedContext {
   MatrixGuardBuffer<uint8_t> BufferBPacked;
 };
 
-template <typename T, bool Packed>
+template <typename T, bool Packed, bool Threaded>
 class MlasFgemmTest {
+ private:
+  MLAS_THREADPOOL* threadpool_;
+
  public:
-  void Test(size_t M, size_t N, size_t K, float alpha, float beta, MLAS_THREADPOOL* threadpool) {
-    Test(false, false, M, N, K, alpha, beta, threadpool);
-    Test(false, true, M, N, K, alpha, beta, threadpool);
-    Test(true, false, M, N, K, alpha, beta, threadpool);
-    Test(true, true, M, N, K, alpha, beta, threadpool);
+  static const char* GetSuitePrefix() {
+    return "FGemmTest";
   }
 
-  void Test(bool trans_a, bool trans_b, size_t M, size_t N, size_t K, float alpha, float beta, MLAS_THREADPOOL* threadpool) {
+  MlasFgemmTest() {
+    threadpool_ = Threaded ? GetMlasThreadPool() : nullptr;
+  }
+
+  void Test(size_t M, size_t N, size_t K, float alpha, float beta) {
+    Test(false, false, M, N, K, alpha, beta);
+    Test(false, true, M, N, K, alpha, beta);
+    Test(true, false, M, N, K, alpha, beta);
+    Test(true, true, M, N, K, alpha, beta);
+  }
+
+  void Test(bool trans_a, bool trans_b, size_t M, size_t N, size_t K, float alpha, float beta) {
     //
     // Skip the test if the B buffer cannot be packed.
     //
@@ -62,7 +73,7 @@ class MlasFgemmTest {
     Test(trans_a ? CblasTrans : CblasNoTrans,
          trans_b ? CblasTrans : CblasNoTrans,
          M, N, K, alpha, A, trans_a ? M : K, B, trans_b ? K : N,
-         beta, C, CReference, N, threadpool);
+         beta, C, CReference, N);
   }
 
   void Test(CBLAS_TRANSPOSE TransA,
@@ -78,12 +89,11 @@ class MlasFgemmTest {
             float beta,
             T* C,
             T* CReference,
-            size_t ldc,
-            MLAS_THREADPOOL* threadpool) {
+            size_t ldc) {
     std::fill_n(C, M * N, -0.5f);
     std::fill_n(CReference, M * N, -0.5f);
 
-    PackedContext.TestGemm(TransA, TransB, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, threadpool);
+    PackedContext.TestGemm(TransA, TransB, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc, threadpool_);
     ReferenceGemm(TransA, TransB, M, N, K, alpha, A, lda, B, ldb, beta, CReference, ldc);
 
     for (size_t m = 0, f = 0; m < M; m++) {
@@ -93,12 +103,12 @@ class MlasFgemmTest {
           ASSERT_EQ(C[f], CReference[f])
               << " Diff @[" << m << ", " << n << "] f=" << f << ", "
               << (Packed ? "Packed" : "NoPack") << "."
-              << (threadpool == nullptr ? "NoThread" : "Threaded") << "/"
+              << (Threaded ? "SingleThread" : "Threaded") << "/"
               << (TransA == CblasTrans ? "TransA" : "A") << "/"
               << (TransB == CblasTrans ? "TransB" : "B") << "/"
-              << "M:" << M << "xN:" << N << "xK:" << K << "/"
-              << "Alpha:" << alpha << "/"
-              << "Beta:" << beta;
+              << "M" << M << "xN" << N << "xK" << K << "/"
+              << "Alpha" << alpha << "/"
+              << "Beta" << beta;
         }
       }
     }
@@ -203,15 +213,15 @@ class MlasFgemmTest {
   MatrixGuardBuffer<T> BufferCReference;
   FGemmTestedContext<T, Packed> PackedContext;
 
-  void ExecuteLong(MLAS_THREADPOOL* threadpool) {
+  void ExecuteLong() {
     static const float multipliers[] = {0.0f, -0.0f, 0.25f, -0.5f, 1.0f, -1.0f};
 
     for (size_t N = 1; N < 128; N++) {
       for (size_t K = 1; K < 128; K++) {
         for (size_t a = 0; a < _countof(multipliers); a++) {
           for (size_t b = 0; b < _countof(multipliers); b++) {
-            Test(1, N, K, multipliers[a], multipliers[b], threadpool);
-            Test(N, 1, K, multipliers[a], multipliers[b], threadpool);
+            Test(1, N, K, multipliers[a], multipliers[b]);
+            Test(N, 1, K, multipliers[a], multipliers[b]);
           }
         }
       }
@@ -229,21 +239,21 @@ class MlasFgemmTest {
             for (size_t k = 0; k < _countof(ks); k++) {
               size_t K = ks[k];
 
-              Test(M, N, K, alpha, beta, threadpool);
-              Test(M + 1, N, K, alpha, beta, threadpool);
-              Test(M, N + 1, K, alpha, beta, threadpool);
-              Test(M + 1, N + 1, K, alpha, beta, threadpool);
-              Test(M + 3, N + 2, K, alpha, beta, threadpool);
-              Test(M + 4, N, K, alpha, beta, threadpool);
-              Test(M, N + 4, K, alpha, beta, threadpool);
-              Test(M + 4, N + 4, K, alpha, beta, threadpool);
-              Test(M + 3, N + 7, K, alpha, beta, threadpool);
-              Test(M + 8, N, K, alpha, beta, threadpool);
-              Test(M, N + 8, K, alpha, beta, threadpool);
-              Test(M + 12, N + 12, K, alpha, beta, threadpool);
-              Test(M + 13, N, K, alpha, beta, threadpool);
-              Test(M, N + 15, K, alpha, beta, threadpool);
-              Test(M + 15, N + 15, K, alpha, beta, threadpool);
+              Test(M, N, K, alpha, beta);
+              Test(M + 1, N, K, alpha, beta);
+              Test(M, N + 1, K, alpha, beta);
+              Test(M + 1, N + 1, K, alpha, beta);
+              Test(M + 3, N + 2, K, alpha, beta);
+              Test(M + 4, N, K, alpha, beta);
+              Test(M, N + 4, K, alpha, beta);
+              Test(M + 4, N + 4, K, alpha, beta);
+              Test(M + 3, N + 7, K, alpha, beta);
+              Test(M + 8, N, K, alpha, beta);
+              Test(M, N + 8, K, alpha, beta);
+              Test(M + 12, N + 12, K, alpha, beta);
+              Test(M + 13, N, K, alpha, beta);
+              Test(M, N + 15, K, alpha, beta);
+              Test(M + 15, N + 15, K, alpha, beta);
             }
           }
           printf("a %zd/%zd b %zd/%zd M %zd\n", a, _countof(multipliers), b, _countof(multipliers), M);
@@ -254,7 +264,7 @@ class MlasFgemmTest {
     for (size_t M = 0; M < 160; M++) {
       for (size_t N = 0; N < 160; N++) {
         for (size_t K = 0; K < 160; K++) {
-          Test(M, N, K, 1.0f, 0.0f, threadpool);
+          Test(M, N, K, 1.0f, 0.0f);
         }
       }
       printf("M %zd\n", M);
@@ -263,10 +273,10 @@ class MlasFgemmTest {
     for (size_t M = 160; M < 320; M += 24) {
       for (size_t N = 112; N < 320; N += 24) {
         for (size_t K = 0; K < 16; K++) {
-          Test(M, N, K, 1.0f, 0.0f, threadpool);
+          Test(M, N, K, 1.0f, 0.0f);
         }
         for (size_t K = 16; K < 160; K += 32) {
-          Test(M, N, K, 1.0f, 0.0f, threadpool);
+          Test(M, N, K, 1.0f, 0.0f);
         }
       }
       printf("M %zd\n", M);
@@ -274,96 +284,96 @@ class MlasFgemmTest {
   }
 };
 
-template <typename T, bool Packed>
+template <typename T, bool Packed, bool Threaded>
 class FGemmTestFixture : public testing::Test {
  public:
+  typedef MlasFgemmTest<T, Packed, Threaded> MlasTesterType;
+
   static void SetUpTestSuite() {
-    mlas_gemm_tester = new MlasFgemmTest<T, Packed>();
+    mlas_gemm_tester = new MlasFgemmTest<T, Packed, Threaded>();
   };
 
   static void TearDownTestSuite() {
-    delete mlas_gemm_tester;
+    if (nullptr != mlas_gemm_tester) {
+      delete mlas_gemm_tester;
+    }
     mlas_gemm_tester = nullptr;
   };
 
-  static MlasFgemmTest<T, Packed>* mlas_gemm_tester;
+  static MlasFgemmTest<T, Packed, Threaded>* mlas_gemm_tester;
 };
 
-MlasFgemmTest<float, false>* FGemmTestFixture<float, false>::mlas_gemm_tester(nullptr);
-MlasFgemmTest<float, true>* FGemmTestFixture<float, true>::mlas_gemm_tester(nullptr);
+MlasFgemmTest<float, false, false>* FGemmTestFixture<float, false, false>::mlas_gemm_tester(nullptr);
+MlasFgemmTest<float, false, true>* FGemmTestFixture<float, false, true>::mlas_gemm_tester(nullptr);
+MlasFgemmTest<float, true, false>* FGemmTestFixture<float, true, false>::mlas_gemm_tester(nullptr);
+MlasFgemmTest<float, true, true>* FGemmTestFixture<float, true, true>::mlas_gemm_tester(nullptr);
 
 // Short Execute treat each test seperately by all parameters.
-template <bool Packed>
-class FgemmShortExecuteTests : public FGemmTestFixture<float, Packed> {
+template <bool Packed, bool Threaded>
+class FgemmShortExecuteTest : public FGemmTestFixture<float, Packed, Threaded> {
  public:
-  explicit FgemmShortExecuteTests(
-      bool trans_a, bool trans_b, size_t M, size_t N, size_t K,
-      float alpha, float beta, MLAS_THREADPOOL* threadpool)
-      : trans_a_(trans_a), trans_b_(trans_b), M_(M), N_(N), K_(K), alpha_(alpha), beta_(beta), threadpool_(threadpool) {
+  explicit FgemmShortExecuteTest(bool trans_a, bool trans_b, size_t M, size_t N, size_t K,
+                                 float alpha, float beta)
+      : trans_a_(trans_a), trans_b_(trans_b), M_(M), N_(N), K_(K), alpha_(alpha), beta_(beta) {
   }
 
   void TestBody() override {
-    mlas_gemm_tester->Test(trans_a_, trans_b_, M_, N_, K_, alpha_, beta_, threadpool_);
+    mlas_gemm_tester->Test(trans_a_, trans_b_, M_, N_, K_, alpha_, beta_);
   }
 
-  static size_t RegisterTest(
-      bool trans_a, bool trans_b, size_t M, size_t N, size_t K,
-      float alpha, float beta, MLAS_THREADPOOL* threadpool) {
+  static size_t RegisterTest(bool trans_a, bool trans_b, size_t M, size_t N, size_t K,
+                             float alpha, float beta) {
+    static const std::string suite_name = std::string(MlasTesterType::GetSuitePrefix()) +
+                                          ("_Short") + (Packed ? "_Packed" : "_NoPack") +
+                                          (Threaded ? "_Threaded" : "_SingleThread");
+
     std::stringstream ss;
     ss << (trans_a ? "TransA" : "A") << "/"
        << (trans_b ? "TransB" : "B") << "/"
-       << "M:" << M << "xN:" << N << "xK:" << K << "/"
-       << "Alpha:" << alpha << "/"
-       << "Beta:" << beta;
-    auto name = ss.str();
-    std::string prefix = (threadpool == nullptr) ? "SingleThread/" : "Threaded/";
+       << "M" << M << "xN" << N << "xK" << K << "/"
+       << "Alpha" << alpha << "/"
+       << "Beta" << beta;
+    auto test_name = ss.str();
 
     testing::RegisterTest(
-        Packed ? "FgemmPack_ShortExec" : "FgemmNoPack_ShortExec",
-        (prefix + name).c_str(),
+        suite_name.c_str(),
+        test_name.c_str(),
         nullptr,
-        name.c_str(),
+        test_name.c_str(),
         __FILE__,
         __LINE__,
         // Important to use the fixture type as the return type here.
-        [=]() -> FGemmTestFixture<float, Packed>* {
-          return new FgemmShortExecuteTests<Packed>(
-              trans_a, trans_b, M, N, K, alpha, beta, threadpool);
+        [=]() -> FGemmTestFixture<float, Packed, Threaded>* {
+          return new FgemmShortExecuteTest<Packed, Threaded>(
+              trans_a, trans_b, M, N, K, alpha, beta);
         });
     return 1;
   }
 
-  static size_t RegisterTest(size_t M, size_t N, size_t K, float alpha, float beta) {
-    auto count = RegisterTest(false, false, M, N, K, alpha, beta, nullptr);
-    count += RegisterTest(false, true, M, N, K, alpha, beta, nullptr);
-    count += RegisterTest(true, false, M, N, K, alpha, beta, nullptr);
-    count += RegisterTest(true, true, M, N, K, alpha, beta, nullptr);
-    const auto tp = GetMlasThreadPool();
-    if (tp != nullptr) {
-      count = RegisterTest(false, false, M, N, K, alpha, beta, tp);
-      count += RegisterTest(false, true, M, N, K, alpha, beta, tp);
-      count += RegisterTest(true, false, M, N, K, alpha, beta, tp);
-      count += RegisterTest(true, true, M, N, K, alpha, beta, tp);
-    }
+  static size_t RegisterTestProductTransposeAB(size_t M, size_t N, size_t K, float alpha, float beta) {
+    auto count = RegisterTest(false, false, M, N, K, alpha, beta);
+    count += RegisterTest(false, true, M, N, K, alpha, beta);
+    count += RegisterTest(true, false, M, N, K, alpha, beta);
+    count += RegisterTest(true, true, M, N, K, alpha, beta);
     return count;
   }
 
-  static size_t Register() {
+  static size_t RegisterShortExecuteTests() {
     size_t test_registered = 0;
     for (size_t b = 0; b < 16; b++) {
-      test_registered += FgemmShortExecuteTests<Packed>::RegisterTest(b, b, b, 1.0f, 0.0f);
+      test_registered += RegisterTestProductTransposeAB(b, b, b, 1.0f, 0.0f);
     }
     for (size_t b = 16; b <= 256; b <<= 1) {
-      test_registered += FgemmShortExecuteTests<Packed>::RegisterTest(b, b, b, 1.0f, 0.0f);
+      test_registered += RegisterTestProductTransposeAB(b, b, b, 1.0f, 0.0f);
       test_registered++;
     }
     for (size_t b = 256; b < 320; b += 32) {
-      test_registered += FgemmShortExecuteTests<Packed>::RegisterTest(b, b, b, 1.0f, 0.0f);
+      test_registered += RegisterTestProductTransposeAB(b, b, b, 1.0f, 0.0f);
       test_registered++;
     }
 
-    test_registered += FgemmShortExecuteTests<Packed>::RegisterTest(128, 3072, 768, 1.0f, 0.0f);
-    test_registered += FgemmShortExecuteTests<Packed>::RegisterTest(128, 768, 3072, 1.0f, 0.0f);
+    test_registered += RegisterTestProductTransposeAB(128, 3072, 768, 1.0f, 0.0f);
+    test_registered += RegisterTestProductTransposeAB(128, 768, 3072, 1.0f, 0.0f);
     return test_registered;
   }
 
@@ -371,53 +381,47 @@ class FgemmShortExecuteTests : public FGemmTestFixture<float, Packed> {
   bool trans_a_, trans_b_;
   size_t M_, N_, K_;
   float alpha_, beta_;
-  MLAS_THREADPOOL* threadpool_;
 };
 
+static auto& lsm = LongShortExecuteManager::instance();
+
 static bool s_gestisted_short =
-    LongShortExecuteManager::instance().AddShortExcuteTests(FgemmShortExecuteTests<false>::Register) &&
-    LongShortExecuteManager::instance().AddShortExcuteTests(FgemmShortExecuteTests<true>::Register);
+    lsm.AddShortExcuteTests(FgemmShortExecuteTest<false, false>::RegisterShortExecuteTests) &&
+    lsm.AddShortExcuteTests(FgemmShortExecuteTest<true, false>::RegisterShortExecuteTests) &&
+    (nullptr != GetMlasThreadPool()) &&
+    lsm.AddShortExcuteTests(FgemmShortExecuteTest<false, true>::RegisterShortExecuteTests) &&
+    lsm.AddShortExcuteTests(FgemmShortExecuteTest<true, true>::RegisterShortExecuteTests);
 
 // Long Execute test. It is too heavy register each single test, treat long execute big groups.
-template <bool Packed>
-class FgemmLongExecuteTests : public FGemmTestFixture<float, Packed> {
+template <bool Packed, bool Threaded>
+class FgemmLongExecuteTests : public FGemmTestFixture<float, Packed, Threaded> {
  public:
-  explicit FgemmLongExecuteTests(MLAS_THREADPOOL* threadpool) : threadpool_(threadpool) {
-  }
-
   void TestBody() override {
-    mlas_gemm_tester->ExecuteLong(threadpool_);
+    mlas_gemm_tester->ExecuteLong();
   }
 
-  static size_t RegisterTest(MLAS_THREADPOOL* threadpool) {
-    std::string prefix = (threadpool == nullptr) ? "SingleThread" : "Threaded";
-
+  static size_t RegisterTest() {
+    static const std::string suite_name = std::string(MlasTesterType::GetSuitePrefix()) +
+                                          ("_Long") + (Packed ? "_Packed" : "_NoPack") +
+                                          (Threaded ? "_Threaded" : "_SingleThread");
     testing::RegisterTest(
-        Packed ? "FgemmPack_LongExec" : "FgemmNoPack_LongExec",
-        prefix.c_str(),
+        suite_name.c_str(),
+        "LongExecute",
         nullptr,
-        prefix.c_str(),
+        "LongExecute",
         __FILE__,
         __LINE__,
         // Important to use the fixture type as the return type here.
-        [=]() -> FGemmTestFixture<float, Packed>* {
-          return new FgemmLongExecuteTests<Packed>(threadpool);
+        [=]() -> FGemmTestFixture<float, Packed, Threaded>* {
+          return new FgemmLongExecuteTests<Packed, Threaded>();
         });
     return 1;
   }
-
-  static size_t Register(void) {
-    auto count = RegisterTest(nullptr);
-    if (GetMlasThreadPool() != nullptr) {
-      count += RegisterTest(GetMlasThreadPool());
-    }
-    return count;
-  }
-
- private:
-  MLAS_THREADPOOL* threadpool_;
 };
 
 static bool s_gestisted_long =
-    LongShortExecuteManager::instance().AddLongExcuteTests(FgemmLongExecuteTests<false>::Register) &&
-    LongShortExecuteManager::instance().AddLongExcuteTests(FgemmLongExecuteTests<true>::Register);
+    lsm.AddLongExcuteTests(FgemmLongExecuteTests<false, false>::RegisterTest) &&
+    lsm.AddLongExcuteTests(FgemmLongExecuteTests<true, false>::RegisterTest) &&
+    (nullptr != GetMlasThreadPool()) &&
+    lsm.AddLongExcuteTests(FgemmLongExecuteTests<false, true>::RegisterTest) &&
+    lsm.AddLongExcuteTests(FgemmLongExecuteTests<true, true>::RegisterTest);
