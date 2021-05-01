@@ -451,6 +451,15 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
     }
   }
 
+  if (info.has_trt_options) {
+    force_sequential_engine_build_ = info.force_sequential_engine_build;
+  } else {
+    const std::string force_sequential_engine_build_env = onnxruntime::GetEnvironmentVar(tensorrt_env_vars::kForceSequentialEngineBuild);
+    if (!force_sequential_engine_build_env.empty()) {
+      force_sequential_engine_build_ = (std::stoi(force_sequential_engine_build_env) == 0 ? false : true);
+    }
+  }
+
   const std::string dump_subgraphs_env = onnxruntime::GetEnvironmentVar(tensorrt_env_vars::kDumpSubgraphs);
   if (!dump_subgraphs_env.empty()) {
     dump_subgraphs_ = (std::stoi(dump_subgraphs_env) == 0 ? false : true);
@@ -473,7 +482,7 @@ TensorrtExecutionProvider::TensorrtExecutionProvider(const TensorrtExecutionProv
         throw std::runtime_error("Failed to create directory " + cache_path_);
       }
     }
-    runtime_ = nvinfer1::createInferRuntime(GetTensorrtLogger());
+    runtime_ = tensorrt_ptr::unique_pointer<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(GetTensorrtLogger()));
   }
 
   const std::string engine_decryption_enable_env = onnxruntime::GetEnvironmentVar(tensorrt_env_vars::kDecryptionEnable);
@@ -1012,6 +1021,13 @@ TensorrtExecutionProvider::GetCapability(const GraphViewer& graph,
   return result;
 }
 
+std::unique_lock<OrtMutex> TensorrtExecutionProvider::GetEngineBuildLock() const {
+  static OrtMutex singleton;
+
+  // Acquire a lock only when force_sequential_engine_build_ is true;
+  return force_sequential_engine_build_ ? std::unique_lock<OrtMutex>(singleton) : std::unique_lock<OrtMutex>();
+}
+
 common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fused_nodes,
                                                   std::vector<NodeComputeInfo>& node_compute_funcs) {
   for (const auto* fused_node : fused_nodes) {
@@ -1179,7 +1195,10 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
         }
 
         // Build engine
-        trt_engine = tensorrt_ptr::unique_pointer<nvinfer1::ICudaEngine>(trt_builder->buildEngineWithConfig(*trt_network, *trt_config));
+        {
+          auto lock = GetEngineBuildLock();
+          trt_engine = tensorrt_ptr::unique_pointer<nvinfer1::ICudaEngine>(trt_builder->buildEngineWithConfig(*trt_network, *trt_config));
+        }
         if (trt_engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL,
                                  "TensorRT EP could not build engine for fused node: " + fused_node->Name());
@@ -1238,12 +1257,12 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
     // TODO: remove default capture
     NodeComputeInfo compute_info;
     compute_info.create_state_func = [=](ComputeContext* context, FunctionState* state) {
-      std::unique_ptr<TensorrtFuncState> p = onnxruntime::make_unique<TensorrtFuncState>();
+      std::unique_ptr<TensorrtFuncState> p = std::make_unique<TensorrtFuncState>();
       *p = {context->allocate_func, context->release_func, context->allocator_handle, &parsers_[context->node_name],
             &engines_[context->node_name], &contexts_[context->node_name], &builders_[context->node_name],
             &networks_[context->node_name], input_info_[context->node_name], output_info_[context->node_name],
             input_shape_ranges_[context->node_name], &tensorrt_mu_, &fp16_enable_, &int8_enable_, &max_workspace_size_,
-            trt_node_name_with_precision, engine_cache_enable_, cache_path_, runtime_,
+            trt_node_name_with_precision, engine_cache_enable_, cache_path_, runtime_.get(), nullptr,
             allocator_, dynamic_range_map, engine_decryption_enable_, engine_decryption_};
       *state = p.release();
       return 0;
@@ -1254,7 +1273,6 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
       if (state)
         delete static_cast<TensorrtFuncState*>(state);
     };
-
     // Create compute function
     compute_info.compute_func = [this](FunctionState state, const OrtCustomOpApi* api, OrtKernelContext* context) {
       Ort::CustomOpApi ort{*api};
@@ -1267,13 +1285,14 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
       auto trt_builder = trt_state->builder->get();
       auto trt_engine = trt_state->engine->get();
       auto trt_context = trt_state->context->get();
+      auto trt_profile = &(trt_state->trt_profile);
       auto alloc = trt_state->scratch_allocator;
       int num_inputs = input_indexes.size();
       int num_outputs = output_indexes.size();
       bool engine_update = false;
-      std::unordered_map<std::string, bool> dimension_update;
+      std::unordered_set<std::string> input_names;
       std::unordered_map<std::string, std::vector<int32_t>> tensor_shape_values;
-      nvinfer1::IOptimizationProfile* trt_profile = nullptr;
+
       cudaStream_t stream = static_cast<cudaStream_t>(this->GetComputeStream());
 
       // Load serialized engine
@@ -1295,9 +1314,8 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
           engine_file.seekg(0, std::ios::beg);
           std::unique_ptr<char[]> engine_buf{new char[engine_size]};
           engine_file.read((char*)engine_buf.get(), engine_size);
-          auto runtime_ = trt_state->runtime;
           *(trt_state->engine) = tensorrt_ptr::unique_pointer<nvinfer1::ICudaEngine>(
-              runtime_->deserializeCudaEngine(engine_buf.get(), engine_size, nullptr));
+              trt_state->runtime->deserializeCudaEngine(engine_buf.get(), engine_size, nullptr));
           if (trt_state->engine == nullptr) {
             return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP Failed to Build Engine.");
           }
@@ -1348,9 +1366,8 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
         const std::string& input_name = input->getName();
         nvinfer1::Dims dims = input->getDimensions();
         int nb_dims = dims.nbDims;
-
         // Check and update shape ranges for dynamic shape inputs
-        dimension_update[input_name] = false;
+        input_names.insert(input_name);
         if (shape_ranges.find(input_name) != shape_ranges.end()) {
           int input_index = 0;
           const auto& iter = input_indexes.find(input_name);
@@ -1411,14 +1428,14 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
                 if (tensor_shape_value < shape_range[j].first) {
                   shape_range[j].first = tensor_shape_value;
                   shapes_min[j] = tensor_shape_value;
-                  dimension_update[input_name] = true;
+                  engine_update = true;
                 }
                 // Update shape range upper bound
                 if (tensor_shape_value > shape_range[j].second) {
                   shape_range[j].second = tensor_shape_value;
                   shapes_max[j] = tensor_shape_value;
                   shapes_opt[j] = tensor_shape_value;
-                  dimension_update[input_name] = true;
+                  engine_update = true;
                 }
               }
             } else {
@@ -1431,15 +1448,16 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
                 shapes_opt[j] = tensor_shape_value;
                 shapes_max[j] = tensor_shape_value;
               }
-              dimension_update[input_name] = true;
+              engine_update = true;
             }
 
-            if (trt_profile == nullptr) {
-              trt_profile = trt_builder->createOptimizationProfile();
+            if (*trt_profile == nullptr) {
+              *trt_profile = trt_builder->createOptimizationProfile();
             }
-            trt_profile->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kMIN, &shapes_min[0], shape_size);
-            trt_profile->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kOPT, &shapes_opt[0], shape_size);
-            trt_profile->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kMAX, &shapes_max[0], shape_size);
+            (*trt_profile)->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kMIN, &shapes_min[0], shape_size);
+            (*trt_profile)->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kOPT, &shapes_opt[0], shape_size);
+            (*trt_profile)->setShapeValues(input_name.c_str(), nvinfer1::OptProfileSelector::kMAX, &shapes_max[0], shape_size);
+
           } else {  // Execution tensor
             nvinfer1::Dims dims_min(dims), dims_opt(dims), dims_max(dims);
             for (int j = 0, end = nb_dims; j < end; ++j) {
@@ -1453,30 +1471,26 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
                 if (tensor_shape < shape_range[j].first) {
                   shape_range[j].first = tensor_shape;
                   dims_min.d[j] = tensor_shape;
-                  dimension_update[input_name] = true;
+                  engine_update = true;
                 }
                 // Update maximum dimension
                 if (tensor_shape > shape_range[j].second) {
                   shape_range[j].second = tensor_shape;
                   dims_max.d[j] = tensor_shape;
                   dims_opt.d[j] = tensor_shape;
-                  dimension_update[input_name] = true;
+                  engine_update = true;
                 }
               }
             }
 
-            if (trt_profile == nullptr) {
-              trt_profile = trt_builder->createOptimizationProfile();
+            if (*trt_profile == nullptr) {
+              *trt_profile = trt_builder->createOptimizationProfile();
             }
-            trt_profile->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kMIN, dims_min);
-            trt_profile->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kOPT, dims_opt);
-            trt_profile->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kMAX, dims_max);
+            (*trt_profile)->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kMIN, dims_min);
+            (*trt_profile)->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kOPT, dims_opt);
+            (*trt_profile)->setDimensions(input_name.c_str(), nvinfer1::OptProfileSelector::kMAX, dims_max);
           }
           ort.ReleaseTensorTypeAndShapeInfo(tensor_info);
-        }
-
-        if (!engine_update && dimension_update[input_name]) {
-          engine_update = true;
         }
       }
 
@@ -1487,7 +1501,7 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
         trt_state->engine->reset();
         auto trt_config = tensorrt_ptr::unique_pointer<nvinfer1::IBuilderConfig>(trt_builder->createBuilderConfig());
         trt_config->setMaxWorkspaceSize(*(trt_state->max_workspace_size_ptr));
-        trt_config->addOptimizationProfile(trt_profile);
+        trt_config->addOptimizationProfile(*trt_profile);
 
         // Set INT8 Per Tensor Dynamic range
         if (*(trt_state->int8_enable_ptr) && trt_builder->platformHasFastInt8()) {
@@ -1507,8 +1521,11 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
         }
 
         // Build engine
-        *(trt_state->engine) = tensorrt_ptr::unique_pointer<nvinfer1::ICudaEngine>(
-            trt_builder->buildEngineWithConfig(*trt_state->network->get(), *trt_config));
+        {
+          auto lock = GetEngineBuildLock();
+          *(trt_state->engine) = tensorrt_ptr::unique_pointer<nvinfer1::ICudaEngine>(
+              trt_builder->buildEngineWithConfig(*trt_state->network->get(), *trt_config));
+        }
         if (trt_state->engine == nullptr) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, EP_FAIL, "TensorRT EP Failed to Build Engine.");
         }
@@ -1568,7 +1585,7 @@ common::Status TensorrtExecutionProvider::Compile(const std::vector<Node*>& fuse
         // Set dynamic shapes
         nvinfer1::Dims dimensions = trt_engine->getBindingDimensions(static_cast<int>(binding_index));
         int nb_dims = dimensions.nbDims;
-        if (dimension_update.find(input_name) != dimension_update.end()) {
+        if (input_names.count(input_name) == 1) {
           if (trt_engine->isShapeBinding(binding_index)) {
             trt_context->setInputShapeBinding(binding_index, &tensor_shape_values[input_name][0]);
           } else {
